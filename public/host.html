@@ -7,31 +7,93 @@
   <style>
     body { font-family: sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
     h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
-    .meta { color: #555; margin-bottom: 1rem; }
+    .meta { color: #555; margin-bottom: 0.5rem; }
+    .ng { color: #8a1f11; margin-bottom: 1rem; }
     ul { list-style: none; padding: 0; display: grid; gap: 0.75rem; }
     li { border: 1px solid #ddd; border-radius: 8px; padding: 0.8rem; }
     .head { display: flex; justify-content: space-between; gap: 1rem; color: #444; font-size: 0.9rem; }
     .message { margin-top: 0.4rem; white-space: pre-wrap; }
+    .reactions { display: flex; gap: 0.5rem; margin-top: 0.7rem; }
+    .reaction-btn { border: 1px solid #cfcfcf; background: #fff; border-radius: 999px; padding: 0.2rem 0.6rem; cursor: pointer; }
+    .reaction-btn:disabled { opacity: 0.6; cursor: default; }
+    .replies { margin-top: 0.7rem; padding-top: 0.5rem; border-top: 1px dashed #ddd; display: grid; gap: 0.4rem; }
+    .reply { font-size: 0.95rem; color: #333; }
+    .reply-form { margin-top: 0.7rem; display: flex; gap: 0.4rem; }
+    .reply-input { flex: 1; padding: 0.45rem; }
+    .reply-btn { padding: 0.45rem 0.8rem; }
   </style>
 </head>
 <body>
   <h1>ホスト画面（リアルタイム表示）</h1>
   <p class="meta" id="connection">接続中...</p>
+  <p class="ng">現在のNGワード: <span id="ngWords">なし</span></p>
   <ul id="commentList"></ul>
 
   <script>
     const list = document.getElementById('commentList');
     const connection = document.getElementById('connection');
+    const ngWords = document.getElementById('ngWords');
+    const reactionMeta = {
+      like: { emoji: '👍', label: 'いいね' },
+      love: { emoji: '❤️', label: 'ハート' },
+      laugh: { emoji: '😂', label: '笑' },
+    };
+    const reactionOrder = Object.keys(reactionMeta);
+
+    function escapeHtml(text) {
+      return String(text)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function normalizeReactions(reactions) {
+      return {
+        like: Number(reactions?.like) || 0,
+        love: Number(reactions?.love) || 0,
+        laugh: Number(reactions?.laugh) || 0,
+      };
+    }
+
+    function renderReplies(replies) {
+      if (!Array.isArray(replies) || replies.length === 0) {
+        return '';
+      }
+
+      return `
+        <div class="replies">
+          ${replies.map((reply) => {
+            const replyTime = new Date(reply.createdAt).toLocaleString('ja-JP');
+            return `<div class="reply" data-reply-id="${reply.id}">↳ <strong>${escapeHtml(reply.name)}</strong> (${replyTime}): ${escapeHtml(reply.message)}</div>`;
+          }).join('')}
+        </div>
+      `;
+    }
 
     function addComment(comment, appendTop = true) {
       const item = document.createElement('li');
+      item.dataset.commentId = String(comment.id);
       const time = new Date(comment.createdAt).toLocaleString('ja-JP');
+      const reactions = normalizeReactions(comment.reactions);
       item.innerHTML = `
         <div class="head">
           <strong>${escapeHtml(comment.name)}</strong>
           <span>${time}</span>
         </div>
         <div class="message">${escapeHtml(comment.message)}</div>
+        <div class="reactions">
+          ${reactionOrder.map((type) => {
+            const meta = reactionMeta[type];
+            return `<button class="reaction-btn" type="button" data-reaction="${type}">${meta.emoji} ${meta.label} <span data-count="${type}">${reactions[type]}</span></button>`;
+          }).join('')}
+        </div>
+        ${renderReplies(comment.replies)}
+        <form class="reply-form" data-reply-form>
+          <input class="reply-input" type="text" data-reply-message placeholder="返信を入力" required />
+          <button class="reply-btn" type="submit">返信</button>
+        </form>
       `;
 
       if (appendTop) {
@@ -41,13 +103,51 @@
       }
     }
 
-    function escapeHtml(text) {
-      return text
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
+    function appendReply(commentId, reply) {
+      const item = list.querySelector(`li[data-comment-id="${commentId}"]`);
+      if (!item) {
+        return;
+      }
+      if (item.querySelector(`[data-reply-id="${reply.id}"]`)) {
+        return;
+      }
+
+      let replies = item.querySelector('.replies');
+      if (!replies) {
+        replies = document.createElement('div');
+        replies.className = 'replies';
+        const form = item.querySelector('[data-reply-form]');
+        item.insertBefore(replies, form);
+      }
+
+      const replyTime = new Date(reply.createdAt).toLocaleString('ja-JP');
+      const replyEl = document.createElement('div');
+      replyEl.className = 'reply';
+      replyEl.dataset.replyId = String(reply.id);
+      replyEl.innerHTML = `↳ <strong>${escapeHtml(reply.name)}</strong> (${replyTime}): ${escapeHtml(reply.message)}`;
+      replies.appendChild(replyEl);
+    }
+
+    function renderNgWords(words) {
+      if (!Array.isArray(words) || words.length === 0) {
+        ngWords.textContent = 'なし';
+        return;
+      }
+      ngWords.textContent = words.join(', ');
+    }
+
+    function updateReactionView(commentId, reactions) {
+      const item = list.querySelector(`li[data-comment-id="${commentId}"]`);
+      if (!item) {
+        return;
+      }
+      const normalized = normalizeReactions(reactions);
+      for (const type of reactionOrder) {
+        const count = item.querySelector(`[data-count="${type}"]`);
+        if (count) {
+          count.textContent = String(normalized[type]);
+        }
+      }
     }
 
     async function loadInitialComments() {
@@ -58,8 +158,15 @@
       }
     }
 
+    async function loadInitialNgWords() {
+      const response = await fetch('/ng-words');
+      const payload = await response.json();
+      renderNgWords(payload.ngWords);
+    }
+
     async function start() {
       await loadInitialComments();
+      await loadInitialNgWords();
 
       const stream = new EventSource('/events');
       stream.onopen = () => {
@@ -70,11 +177,111 @@
         connection.textContent = '接続エラー（再接続中）';
       };
 
-      stream.onmessage = (event) => {
+      stream.addEventListener('comment', (event) => {
         const comment = JSON.parse(event.data);
         addComment(comment);
-      };
+      });
+
+      stream.addEventListener('ng_words_updated', (event) => {
+        const payload = JSON.parse(event.data);
+        renderNgWords(payload.ngWords);
+      });
+
+      stream.addEventListener('reaction_updated', (event) => {
+        const payload = JSON.parse(event.data);
+        updateReactionView(payload.commentId, payload.reactions);
+      });
+
+      stream.addEventListener('reply_added', (event) => {
+        const payload = JSON.parse(event.data);
+        appendReply(payload.commentId, payload.reply);
+      });
     }
+
+    list.addEventListener('click', async (event) => {
+      const button = event.target.closest('button[data-reaction]');
+      if (!button) {
+        return;
+      }
+
+      const item = button.closest('li[data-comment-id]');
+      if (!item) {
+        return;
+      }
+
+      const commentId = item.dataset.commentId;
+      const type = button.dataset.reaction;
+      if (!commentId || !type) {
+        return;
+      }
+
+      button.disabled = true;
+      try {
+        const response = await fetch(`/comments/${commentId}/reactions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type }),
+        });
+
+        if (!response.ok) {
+          throw new Error('reaction failed');
+        }
+
+        const payload = await response.json();
+        updateReactionView(payload.commentId, payload.reactions);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    list.addEventListener('submit', async (event) => {
+      const form = event.target.closest('form[data-reply-form]');
+      if (!form) {
+        return;
+      }
+
+      event.preventDefault();
+      const item = form.closest('li[data-comment-id]');
+      if (!item) {
+        return;
+      }
+
+      const commentId = item.dataset.commentId;
+      const messageInput = form.querySelector('[data-reply-message]');
+      const message = messageInput ? messageInput.value.trim() : '';
+      if (!commentId || !message) {
+        return;
+      }
+
+      const submitButton = form.querySelector('button[type="submit"]');
+      if (submitButton) {
+        submitButton.disabled = true;
+      }
+
+      try {
+        const response = await fetch(`/comments/${commentId}/replies`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, name: 'ホスト' }),
+        });
+
+        if (!response.ok) {
+          throw new Error('reply failed');
+        }
+
+        const payload = await response.json();
+        appendReply(payload.commentId, payload.reply);
+        form.reset();
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (submitButton) {
+          submitButton.disabled = false;
+        }
+      }
+    });
 
     start();
   </script>
