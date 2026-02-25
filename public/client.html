@@ -16,9 +16,11 @@
     .history-item { border: 1px solid #ddd; border-radius: 8px; padding: 0.8rem; }
     .head { display: flex; justify-content: space-between; gap: 1rem; color: #444; font-size: 0.9rem; }
     .message { margin-top: 0.4rem; white-space: pre-wrap; }
+    .meta { margin-top: 0.4rem; font-size: 0.9rem; color: #555; }
     .replies { margin-top: 0.7rem; padding-top: 0.5rem; border-top: 1px dashed #ddd; display: grid; gap: 0.4rem; }
     .reply { font-size: 0.95rem; color: #333; }
     .empty { color: #666; }
+    .no-reply-btn { margin-top: 0.6rem; padding: 0.35rem 0.6rem; font-size: 0.9rem; }
   </style>
 </head>
 <body>
@@ -86,29 +88,35 @@
       `;
     }
 
+    function buildCommentHtml(comment) {
+      const time = new Date(comment.createdAt).toLocaleString('ja-JP');
+      const needsReply = comment.needsReply !== false;
+      return `
+        <div class="head">
+          <strong>${escapeHtml(comment.name)}</strong>
+          <span>${time}</span>
+        </div>
+        <div class="message">${escapeHtml(comment.message)}</div>
+        <div class="meta">返信状態: ${needsReply ? '返信待ち' : '返信不要'}</div>
+        ${needsReply ? '<button type="button" class="no-reply-btn" data-no-reply-btn>返信不要を送信</button>' : ''}
+        ${renderReplies(comment.replies)}
+      `;
+    }
+
     function upsertHistoryComment(comment) {
       if (!sentIds.has(comment.id)) {
         return;
       }
 
       const existing = historyList.querySelector(`li[data-comment-id="${comment.id}"]`);
-      const time = new Date(comment.createdAt).toLocaleString('ja-JP');
-      const html = `
-        <div class="head">
-          <strong>${escapeHtml(comment.name)}</strong>
-          <span>${time}</span>
-        </div>
-        <div class="message">${escapeHtml(comment.message)}</div>
-        ${renderReplies(comment.replies)}
-      `;
 
       if (existing) {
-        existing.innerHTML = html;
+        existing.innerHTML = buildCommentHtml(comment);
       } else {
         const item = document.createElement('li');
         item.className = 'history-item';
         item.dataset.commentId = String(comment.id);
-        item.innerHTML = html;
+        item.innerHTML = buildCommentHtml(comment);
         historyList.prepend(item);
       }
 
@@ -158,6 +166,42 @@
       }
     });
 
+    historyList.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-no-reply-btn]');
+      if (!button) {
+        return;
+      }
+
+      const item = button.closest('li[data-comment-id]');
+      if (!item) {
+        return;
+      }
+
+      const commentId = item.dataset.commentId;
+      if (!commentId) {
+        return;
+      }
+
+      button.disabled = true;
+      try {
+        const response = await fetch(`/comments/${commentId}/reply-status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ needsReply: false }),
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.error || '返信不要の送信に失敗しました');
+        }
+
+        await refreshHistory();
+      } catch (error) {
+        status.textContent = error.message;
+        button.disabled = false;
+      }
+    });
+
     async function start() {
       await refreshHistory();
 
@@ -168,6 +212,10 @@
       });
 
       stream.addEventListener('reply_added', async () => {
+        await refreshHistory();
+      });
+
+      stream.addEventListener('reply_requirement_updated', async () => {
         await refreshHistory();
       });
     }

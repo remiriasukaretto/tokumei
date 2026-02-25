@@ -18,6 +18,7 @@ node server.js
 - クライアントは `/comments` へ POST でコメント送信
 - ホストは `EventSource` (`/events`) で新着コメントをリアルタイム受信
 - クライアント画面で「このブラウザで送信した履歴」を確認可能（ブラウザ `localStorage` 利用）
+- クライアント画面から「返信不要」を送信可能（`POST /comments/:id/reply-status` with `{ needsReply: false }`）
 - ホスト画面で各コメントに `いいね/ハート/笑` リアクションを付与可能（`POST /comments/:id/reactions`）
 - ホスト画面で各コメントへ返信可能（`POST /comments/:id/replies`）
 - NG候補ワード（例: `死ね`, `kill`, `fuck`）を含む投稿は拒否し、該当語を自動でNGワードに追加

@@ -177,6 +177,7 @@ const server = http.createServer((req, res) => {
           createdAt: new Date().toISOString(),
           reactions: normalizeReactions(),
           replies: [],
+          needsReply: true,
         };
 
         comments.push(comment);
@@ -258,6 +259,10 @@ const server = http.createServer((req, res) => {
       sendJson(res, 404, { error: 'comment not found' });
       return;
     }
+    if (comment.needsReply === false) {
+      sendJson(res, 409, { error: 'reply is not required for this comment' });
+      return;
+    }
 
     let raw = '';
     req.on('data', (chunk) => {
@@ -290,6 +295,50 @@ const server = http.createServer((req, res) => {
         };
         broadcastEvent('reply_added', payload);
         sendJson(res, 201, payload);
+      } catch (error) {
+        sendJson(res, 400, { error: 'invalid json' });
+      }
+    });
+
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname.startsWith('/comments/') && url.pathname.endsWith('/reply-status')) {
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts.length !== 3 || parts[0] !== 'comments' || parts[2] !== 'reply-status') {
+      sendJson(res, 404, { error: 'Not Found' });
+      return;
+    }
+
+    const commentId = Number(parts[1]);
+    if (!Number.isFinite(commentId)) {
+      sendJson(res, 400, { error: 'invalid comment id' });
+      return;
+    }
+
+    const comment = findCommentById(commentId);
+    if (!comment) {
+      sendJson(res, 404, { error: 'comment not found' });
+      return;
+    }
+
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+
+    req.on('end', () => {
+      try {
+        const { needsReply } = JSON.parse(raw || '{}');
+        if (typeof needsReply !== 'boolean') {
+          sendJson(res, 400, { error: 'needsReply(boolean) is required' });
+          return;
+        }
+
+        comment.needsReply = needsReply;
+        const payload = { commentId, needsReply };
+        broadcastEvent('reply_requirement_updated', payload);
+        sendJson(res, 200, payload);
       } catch (error) {
         sendJson(res, 400, { error: 'invalid json' });
       }
