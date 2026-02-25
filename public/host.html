@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>コメント監視（ホスト）</title>
+  <style>
+    body { font-family: sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+    .meta { color: #555; margin-bottom: 1rem; }
+    ul { list-style: none; padding: 0; display: grid; gap: 0.75rem; }
+    li { border: 1px solid #ddd; border-radius: 8px; padding: 0.8rem; }
+    .head { display: flex; justify-content: space-between; gap: 1rem; color: #444; font-size: 0.9rem; }
+    .message { margin-top: 0.4rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>ホスト画面（リアルタイム表示）</h1>
+  <p class="meta" id="connection">接続中...</p>
+  <ul id="commentList"></ul>
+
+  <script>
+    const list = document.getElementById('commentList');
+    const connection = document.getElementById('connection');
+
+    function addComment(comment, appendTop = true) {
+      const item = document.createElement('li');
+      const time = new Date(comment.createdAt).toLocaleString('ja-JP');
+      item.innerHTML = `
+        <div class="head">
+          <strong>${escapeHtml(comment.name)}</strong>
+          <span>${time}</span>
+        </div>
+        <div class="message">${escapeHtml(comment.message)}</div>
+      `;
+
+      if (appendTop) {
+        list.prepend(item);
+      } else {
+        list.appendChild(item);
+      }
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    async function loadInitialComments() {
+      const response = await fetch('/comments');
+      const comments = await response.json();
+      for (const comment of comments) {
+        addComment(comment, false);
+      }
+    }
+
+    async function start() {
+      await loadInitialComments();
+
+      const stream = new EventSource('/events');
+      stream.onopen = () => {
+        connection.textContent = '接続済み';
+      };
+
+      stream.onerror = () => {
+        connection.textContent = '接続エラー（再接続中）';
+      };
+
+      stream.onmessage = (event) => {
+        const comment = JSON.parse(event.data);
+        addComment(comment);
+      };
+    }
+
+    start();
+  </script>
+</body>
+</html>
