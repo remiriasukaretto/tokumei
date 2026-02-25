@@ -21,6 +21,7 @@
     .reply-form { margin-top: 0.7rem; display: flex; gap: 0.4rem; }
     .reply-input { flex: 1; padding: 0.45rem; }
     .reply-btn { padding: 0.45rem 0.8rem; }
+    .reply-status { margin-top: 0.35rem; font-size: 0.85rem; color: #b42318; min-height: 1.1rem; }
   </style>
 </head>
 <body>
@@ -72,12 +73,10 @@
       `;
     }
 
-    function addComment(comment, appendTop = true) {
-      const item = document.createElement('li');
-      item.dataset.commentId = String(comment.id);
+    function buildCommentHtml(comment) {
       const time = new Date(comment.createdAt).toLocaleString('ja-JP');
       const reactions = normalizeReactions(comment.reactions);
-      item.innerHTML = `
+      return `
         <div class="head">
           <strong>${escapeHtml(comment.name)}</strong>
           <span>${time}</span>
@@ -94,7 +93,20 @@
           <input class="reply-input" type="text" data-reply-message placeholder="返信を入力" required />
           <button class="reply-btn" type="submit">返信</button>
         </form>
+        <div class="reply-status" data-reply-status></div>
       `;
+    }
+
+    function addComment(comment, appendTop = true) {
+      const existing = list.querySelector(`li[data-comment-id="${comment.id}"]`);
+      if (existing) {
+        existing.innerHTML = buildCommentHtml(comment);
+        return;
+      }
+
+      const item = document.createElement('li');
+      item.dataset.commentId = String(comment.id);
+      item.innerHTML = buildCommentHtml(comment);
 
       if (appendTop) {
         list.prepend(item);
@@ -256,8 +268,12 @@
       }
 
       const submitButton = form.querySelector('button[type="submit"]');
+      const status = item.querySelector('[data-reply-status]');
       if (submitButton) {
         submitButton.disabled = true;
+      }
+      if (status) {
+        status.textContent = '';
       }
 
       try {
@@ -268,14 +284,17 @@
         });
 
         if (!response.ok) {
-          throw new Error('reply failed');
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error || 'reply failed');
         }
 
         const payload = await response.json();
         appendReply(payload.commentId, payload.reply);
         form.reset();
       } catch (error) {
-        console.error(error);
+        if (status) {
+          status.textContent = `返信失敗: ${error.message}`;
+        }
       } finally {
         if (submitButton) {
           submitButton.disabled = false;
